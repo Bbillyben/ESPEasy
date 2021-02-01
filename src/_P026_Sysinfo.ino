@@ -1,11 +1,14 @@
+#include "_Plugin_Helper.h"
 #ifdef USES_P026
 //#######################################################################################################
 //#################################### Plugin 026: System Info ##########################################
 //#######################################################################################################
 
-#include "_Plugin_Helper.h"
 
-#include "ESPEasy_packed_raw_data.h"
+#include "src/DataStructs/ESPEasy_packed_raw_data.h"
+#include "src/ESPEasyCore/ESPEasyNetwork.h"
+#include "src/Helpers/Memory.h"
+#include "ESPEasy-Globals.h"
 
 #define PLUGIN_026
 #define PLUGIN_ID_026         26
@@ -13,8 +16,8 @@
 
 // place sensor type selector right after the output value settings
 #define P026_QUERY1_CONFIG_POS  0
-#define P026_SENSOR_TYPE_INDEX  P026_QUERY1_CONFIG_POS + VARS_PER_TASK
-#define P026_NR_OUTPUT_VALUES   getValueCountFromSensorType(PCONFIG(P026_SENSOR_TYPE_INDEX))
+#define P026_SENSOR_TYPE_INDEX  (P026_QUERY1_CONFIG_POS + VARS_PER_TASK)
+#define P026_NR_OUTPUT_VALUES   getValueCountFromSensorType(static_cast<Sensor_VType>(PCONFIG(P026_SENSOR_TYPE_INDEX)))
 
 #define P026_NR_OUTPUT_OPTIONS  12
 
@@ -47,11 +50,12 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
     case PLUGIN_DEVICE_ADD:
     {
       Device[++deviceCount].Number       = PLUGIN_ID_026;
-      Device[deviceCount].VType          = SENSOR_TYPE_QUAD;
+      Device[deviceCount].VType          = Sensor_VType::SENSOR_TYPE_QUAD;
       Device[deviceCount].ValueCount     = 4;
       Device[deviceCount].SendDataOption = true;
       Device[deviceCount].TimerOption    = true;
       Device[deviceCount].FormulaOption  = true;
+      Device[deviceCount].OutputDataType = Output_Data_type_t::Simple;
       break;
     }
 
@@ -78,6 +82,22 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
       break;
     }
 
+    case PLUGIN_GET_DEVICEVALUECOUNT:
+    {
+      event->Par1 = P026_NR_OUTPUT_VALUES;
+      success = true;
+      break;
+    }
+
+    case PLUGIN_GET_DEVICEVTYPE:
+    {
+      event->sensorType = static_cast<Sensor_VType>(PCONFIG(P026_SENSOR_TYPE_INDEX));
+      event->idx = P026_SENSOR_TYPE_INDEX;
+      success = true;
+      break;
+    }
+
+
     case PLUGIN_SET_DEFAULTS:
     {
       PCONFIG(0) = 0;    // "Uptime"
@@ -85,14 +105,13 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
       for (byte i = 1; i < VARS_PER_TASK; ++i) {
         PCONFIG(i) = 11; // "None"
       }
-      PCONFIG(P026_SENSOR_TYPE_INDEX) = SENSOR_TYPE_QUAD;
+      PCONFIG(P026_SENSOR_TYPE_INDEX) = static_cast<byte>(Sensor_VType::SENSOR_TYPE_QUAD);
       success                         = true;
       break;
     }
 
     case PLUGIN_WEBFORM_LOAD:
     {
-      sensorTypeHelper_webformLoad_simple(event, P026_SENSOR_TYPE_INDEX);
       String options[P026_NR_OUTPUT_OPTIONS];
 
       for (byte i = 0; i < P026_NR_OUTPUT_OPTIONS; ++i) {
@@ -115,14 +134,12 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
         const byte choice       = PCONFIG(pconfigIndex);
         sensorTypeHelper_saveOutputSelector(event, pconfigIndex, i, Plugin_026_valuename(choice, false));
       }
-      sensorTypeHelper_saveSensorType(event, P026_SENSOR_TYPE_INDEX);
       success = true;
       break;
     }
 
     case PLUGIN_INIT:
     {
-      sensorTypeHelper_setSensorType(event, P026_SENSOR_TYPE_INDEX);
       success = true;
       break;
     }
@@ -140,7 +157,7 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
           if (i != 0) {
             log += ',';
           }
-          log += UserVar[event->BaseVarIndex + i];
+          log += formatUserVarNoCheck(event->TaskIndex, i);
         }
         addLog(LOG_LEVEL_INFO, log);
       }
@@ -201,7 +218,7 @@ float P026_get_value(int type)
 # if FEATURE_ADC_VCC
       value = vcc;
 # else // if FEATURE_ADC_VCC
-      value = -1.0;
+      value = -1.0f;
 # endif // if FEATURE_ADC_VCC
       break;
     }
@@ -211,23 +228,11 @@ float P026_get_value(int type)
       break;
     }
     case 5:
-    {
-      value = WiFi.localIP()[0];
-      break;
-    }
     case 6:
-    {
-      value = WiFi.localIP()[1];
-      break;
-    }
     case 7:
-    {
-      value = WiFi.localIP()[2];
-      break;
-    }
     case 8:
     {
-      value = WiFi.localIP()[3];
+      value = NetworkLocalIP()[type - 5];
       break;
     }
     case 9:
